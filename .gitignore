@@ -1,0 +1,6 @@
+# Windows build output
+obj/
+bin.exe
+
+# Host benchmark output
+tools/bench/build/

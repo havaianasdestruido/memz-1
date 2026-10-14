@@ -1,6 +1,7 @@
 #include <memz/overwatch.h>
 #include <memz/util.h>
 #include <memz/data.h>
+#include <memz/cache.h>
 #include <TlHelp32.h>
 #include <Psapi.h>
 
@@ -61,12 +62,35 @@ static void kill_windows()
 #endif
 }
 
+/*
+ * The watchdog used to call OpenProcess() + GetProcessImageFileNameA() for
+ * every process in the system -- and LocalAlloc()/LocalFree() 512 bytes on
+ * top of that -- ten times per second. Whether a pid runs our own image does
+ * not change while that process lives, so the answer is cached: the two
+ * syscalls now only happen for pids that have never been seen before (a few
+ * per minute), and the 512 byte buffer is allocated once.
+ */
+static char process_path[512];
+
+static int resolve_same_image(DWORD pid, const char* self, void* context)
+{
+    (void)context;
+
+    HANDLE hProc = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
+
+    process_path[0] = '\0';
+    GetProcessImageFileNameA(hProc, process_path, sizeof(process_path));
+
+    if (hProc)
+        CloseHandle(hProc);
+
+    return lstrcmpA(self, process_path) == 0;
+}
+
 static DWORD WINAPI overwatch_thread(LPVOID parameter)
 {
+    (void)parameter;
     int oproc = 0;
-
-    char *fn = (char *)LocalAlloc(LMEM_ZEROINIT, 512);
-    GetProcessImageFileNameA(GetCurrentProcess(), fn, 512);
 
     Sleep(1000);
 
@@ -79,18 +103,15 @@ static DWORD WINAPI overwatch_thread(LPVOID parameter)
         Process32First(snapshot, &proc);
 
         int nproc = 0;
+
+        cache_proc_begin();
+
         do {
-            HANDLE hProc = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, proc.th32ProcessID);
-            char *fn2 = (char *)LocalAlloc(LMEM_ZEROINIT, 512);
-            GetProcessImageFileNameA(hProc, fn2, 512);
-
-            if (!lstrcmpA(fn, fn2)) {
+            if (cache_proc_match(proc.th32ProcessID, &resolve_same_image, NULL) > 0)
                 nproc++;
-            }
-
-            CloseHandle(hProc);
-            LocalFree(fn2);
         } while (Process32Next(snapshot, &proc));
+
+        cache_proc_end();
 
         CloseHandle(snapshot);
 
@@ -144,6 +165,8 @@ void start_overwatch()
 
 void overwatch()
 {
+    cache_init();
+
     CreateThread(NULL, 0, overwatch_thread, NULL, 0, 0);
 
     WNDCLASSEXA c;
