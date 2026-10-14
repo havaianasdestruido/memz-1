@@ -1,17 +1,31 @@
 #include <memz/util.h>
-#include <Wincrypt.h>
+#include <memz/cache.h>
 
-static HCRYPTPROV prov = 0;
+/*
+ * random() is the most called function in the whole program: every payload
+ * tick asks for one to five numbers, and the buzzer asks for 120 per audio
+ * buffer. It used to be one CryptGenRandom() *syscall* per number.
+ *
+ * The cache keeps a pool of MEMZ_CACHE_RANDOM_SLOTS numbers in RAM and
+ * refills the whole pool with a single CryptGenRandom() call, so the syscall
+ * cost is amortised over 65536 draws. The values themselves are still
+ * cryptographically random and cover the same range as before.
+ */
 
 int random()
 {
-    if (prov == 0)
-        if (!CryptAcquireContext(&prov, NULL, NULL, PROV_RSA_FULL, CRYPT_SILENT | CRYPT_VERIFYCONTEXT))
-            ExitProcess(1);
+    return cache_random();
+}
 
-    int out;
-    CryptGenRandom(prov, sizeof(out), (BYTE *)(&out));
-    return out & 0x7fffffff;
+/*
+ * Cheaper range reduction for the hot paths. `random() % upper` compiles to
+ * an integer division (~20-40 cycles); this is a multiply and a shift with a
+ * rejection step that almost never triggers. Use it wherever the old code
+ * wrote `random() % n`.
+ */
+int random_below(int upper)
+{
+    return cache_random_below(upper);
 }
 
 void reverse_string_w(LPWSTR str)
@@ -46,8 +60,9 @@ LRESULT CALLBACK message_box_hook(int nCode, WPARAM wParam, LPARAM lParam)
         if ((pcs->style & WS_DLGFRAME) || (pcs->style & WS_POPUP)) {
             //HWND hwnd = (HWND)wParam;
 
-            int x = random() % (GetSystemMetrics(SM_CXSCREEN) - pcs->cx);
-            int y = random() % (GetSystemMetrics(SM_CYSCREEN) - pcs->cy);
+            /* Screen metrics do not change while memz runs: resolved once. */
+            int x = random_below(cache_metric(SM_CXSCREEN) - pcs->cx);
+            int y = random_below(cache_metric(SM_CYSCREEN) - pcs->cy);
 
             pcs->x = x;
             pcs->y = y;
